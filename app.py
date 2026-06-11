@@ -21,7 +21,7 @@ def clean_text(text):
 
     text = text.lower()
 
-    words = word_tokenize(text)
+    words = text.split()
 
     stop_words = set(stopwords.words('english'))
 
