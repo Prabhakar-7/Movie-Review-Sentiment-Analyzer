@@ -3,6 +3,7 @@ import joblib
 import re
 import nltk
 from nltk.corpus import stopwords
+from spellchecker import SpellChecker  # Added for production-grade typo handling
 
 # Download NLTK resources
 nltk.download('stopwords')
@@ -98,7 +99,6 @@ textarea:focus {
 }
 
 /* ---- BUTTON FIX BLOCK ---- */
-/* This ensures the Streamlit layout wrapper does not squeeze the button container */
 div.stButton {
     display: flex;
     justify-content: center;
@@ -107,9 +107,8 @@ div.stButton {
     margin-top: 15px;
 }
 
-/* Targets the core button object securely */
 div.stButton > button {
-    width: 280px !important;  /* Hardcoded fixed-width so text never wraps or breaks */
+    width: 280px !important;
     height: 48px !important;
     font-size: 15px !important;
     font-weight: 600 !important;
@@ -119,7 +118,7 @@ div.stButton > button {
     border: 1px solid rgba(255, 255, 255, 0.1) !important;
     border-radius: 8px !important;
     box-shadow: 0 4px 12px rgba(3, 105, 161, 0.2) !important;
-    white-space: nowrap !important; /* Forces the text to stay on a single line */
+    white-space: nowrap !important;
     transition: all 0.2s ease !important;
 }
 
@@ -133,7 +132,6 @@ div.stButton > button:hover {
 div.stButton > button:active {
     transform: translateY(1px);
 }
-/* -------------------------- */
 
 /* Status Alert Designs */
 .result-positive {
@@ -171,20 +169,34 @@ div[data-testid="stMetric"] {
 </style>
 """, unsafe_allow_html=True)
 
-# Load Model and Vectorizer
+# Initialize Model, Vectorizer, Stopwords, and SpellChecker
 model = joblib.load("sentiment_model.pkl")
 tfidf = joblib.load("tfidf_vectorizer.pkl")
-
-# Stopwords
 stop_words = set(stopwords.words('english'))
+spell = SpellChecker()  # Initialized once to save performance latency
 
 def clean_text(text):
     text = str(text)
+    
+    # 1. Strip out HTML break tags
     text = re.sub(r'<br\s*/?>', ' ', text)
+    
+    # 2. Keep only pure character values
     text = re.sub(r'[^a-zA-Z\s]', '', text)
     text = text.lower()
+    
     words = text.split()
-    cleaned_words = [word for word in words if word not in stop_words]
+    
+    # 3. Dynamic Spelling Auto-Correction Block
+    # Looks up variations and targets the closest linguistic match
+    corrected_words = [spell.correction(word) if spell.unknown([word]) else word for word in words]
+    
+    # Filter out None values in case correction fails, and drop stopwords
+    cleaned_words = [
+        word for word in corrected_words 
+        if word and word not in stop_words
+    ]
+    
     return " ".join(cleaned_words)
 
 # Sidebar Control Console
@@ -200,8 +212,8 @@ with st.sidebar:
     with tab1:
         st.markdown("### Model Stack")
         st.info("**Vectorization:** TF-IDF\n\n**Classifier:** Logistic Regression")
-        st.markdown("### Dataset")
-        st.caption("Evaluated against the IMDB reference archive (50,000 processed samples).")
+        st.markdown("### Error Processing")
+        st.success("🤖 **Autocorrect Node Active:** Input text undergoes real-time spelling correction prior to TF-IDF transformations.")
         
     with tab2:
         st.markdown("### Framework Execution")
@@ -238,14 +250,16 @@ review = st.text_area(
 )
 
 # Action Trigger Execution
-if st.button("Predict"):
+if st.button("Predict Sentiment"):
     if not review.strip():
         st.warning("Execution interrupted: Input buffer empty.")
     else:
-        cleaned = clean_text(review)
-        vector = tfidf.transform([cleaned])
-        prediction = model.predict(vector)[0]
-        probs = model.predict_proba(vector)[0]
+        # Spinner shows user that background calculations are happening
+        with st.spinner("Processing NLP normalizations & checking orthography..."):
+            cleaned = clean_text(review)
+            vector = tfidf.transform([cleaned])
+            prediction = model.predict(vector)[0]
+            probs = model.predict_proba(vector)[0]
 
         negative_score = probs[0] * 100
         positive_score = probs[1] * 100
